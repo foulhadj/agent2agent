@@ -31,21 +31,14 @@ There will be four main agents in this system. To be accessible to the Host Agen
 
 To be accessible to the Host Agent, each friend agent will run as a separate server, exposing an API that the Host Agent can call.
 
-#### 3.2.1. Karley's Agent
-
--   **Framework:** Agent Development Kit (ADK)
--   **Role:** Manages Karley's schedule and preferences for playing pickleball.
--   **Example:** Based on `@google_adk` sample.
--   **Port:** `10002`
-
-#### 3.2.2. Nate's Agent
+#### 3.2.1. Nate's Agent
 
 -   **Framework:** CrewAI
 -   **Role:** Manages Nate's schedule and preferences. This will demonstrate how a CrewAI-based agent can be integrated into the A2A network.
 -   **Example:** Based on `@crewai` sample.
 -   **Port:** `10003`
 
-#### 3.2.3. Kaitlyn's Agent
+#### 3.2.2. Kaitlyn's Agent
 
 -   **Framework:** LangGraph
 -   **Role:** Manages Kaitlyn's schedule and preferences. This will showcase integration with a LangGraph-based agent.
@@ -72,7 +65,6 @@ The Host Agent will be equipped with a specialized set of tools for scheduling p
 1.  **Finalize Master Plan:** Flesh out this document with any more details.
 2.  **Develop Pickleball Scheduling Tools:** Create the Python scripts for the scheduling tools, including the SQLite database interaction.
 3.  **Review and Refine Host Agent:** Correct the "raw instructions" for the host agent and integrate the new scheduling tools.
-4.  **Develop Karley's Agent (ADK):** Create the agent and expose it as a server.
-5.  **Develop Nate's Agent (CrewAI):** Create the agent and expose it as a server.
-6.  **Develop Kaitlyn's Agent (LangGraph):** Create the agent and expose it as a server.
-7.  **Integration and Testing:** Ensure all agents can communicate with the host agent and a pickleball game can be successfully scheduled.
+4.  **Develop Nate's Agent (CrewAI):** Create the agent and expose it as a server.
+5.  **Develop Kaitlyn's Agent (LangGraph):** Create the agent and expose it as a server.
+6.  **Integration and Testing:** Ensure all agents can communicate with the host agent and a pickleball game can be successfully scheduled.

@@ -7,6 +7,8 @@ from crewai import LLM, Agent, Crew, Process, Task
 from crewai.tools import BaseTool
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+from langchain_openai import AzureChatOpenAI
+import os
 
 load_dotenv()
 
@@ -91,13 +93,16 @@ class SchedulingAgent:
 
     def __init__(self):
         """Initializes the SchedulingAgent."""
-        if os.getenv("GOOGLE_API_KEY"):
-            self.llm = LLM(
-                model="gemini/gemini-2.0-flash",
-                api_key=os.getenv("GOOGLE_API_KEY"),
-            )
+        if os.getenv("AZURE_OPENAI_KEY"):
+            self.llm = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
+            temperature=0,
+        )
         else:
-            raise ValueError("GOOGLE_API_KEY environment variable not set.")
+            raise ValueError("AZURE_OPENAI_KEY environment variable not set.")
 
         self.scheduling_assistant = Agent(
             role="Personal Scheduling Assistant",

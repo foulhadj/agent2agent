@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, AsyncIterable, List
 
 import httpx
+import nest_asyncio
 from a2a.client import A2ACardResolver
 from a2a.types import (
     AgentCard,
@@ -25,8 +26,6 @@ from google.adk.tools.tool_context import ToolContext
 from google.adk.models.lite_llm import LiteLlm
 from google.genai import types
 
-import os
-
 from .pickleball_tools import (
     book_pickleball_court,
     list_court_availabilities,
@@ -34,34 +33,21 @@ from .pickleball_tools import (
 from .remote_agent_connection import RemoteAgentConnections
 
 load_dotenv()
-
-
-def _parts_to_text(parts) -> str:
-    """Concatène proprement tous les bouts de texte retournés par le modèle/outils."""
-    out = []
-    for p in parts or []:
-        t = getattr(p, "text", None)
-        if t:
-            out.append(t)
-        elif isinstance(p, dict) and p.get("type") == "text" and p.get("text"):
-            out.append(p["text"])
-    return "\n".join([s for s in out if s]).strip()
+nest_asyncio.apply()
 
 
 class HostAgent:
     """The Host agent."""
 
-    def __init__(self):
+    def __init__(
+        self,
+    ):
         self.remote_agent_connections: dict[str, RemoteAgentConnections] = {}
         self.cards: dict[str, AgentCard] = {}
-        self.agents: str = ""  # rempli après découverte des "friends"
+        self.agents: str = ""
+        self._agent = self.create_agent()
         self._user_id = "host_agent"
-
-        # ✅ Crée l'agent + runner IMMÉDIATEMENT (comme ton code d'origine).
-        # Le prompt lit self.agents dynamiquement via root_instruction,
-        # donc il se mettra à jour au prochain tour
-        self._agent: Agent = self.create_agent()
-        self._runner: Runner = Runner(
+        self._runner = Runner(
             app_name=self._agent.name,
             agent=self._agent,
             artifact_service=InMemoryArtifactService(),
@@ -70,7 +56,6 @@ class HostAgent:
         )
 
     async def _async_init_components(self, remote_agent_addresses: List[str]):
-        """Découvre les 'friends' et remplit self.agents, sans bloquer l'import du module."""
         async with httpx.AsyncClient(timeout=30) as client:
             for address in remote_agent_addresses:
                 card_resolver = A2ACardResolver(client, address)
@@ -90,21 +75,13 @@ class HostAgent:
             json.dumps({"name": card.name, "description": card.description})
             for card in self.cards.values()
         ]
-        self.agents = "\n".join(agent_info) if agent_info else "No friends found"
-        # Rafraîchir l’instruction de l’agent maintenant que self.agents est rempli
-        # try:
-        #     # Certaines versions ont un setter
-        #     if hasattr(self._agent, "set_instruction") and callable(self._agent.set_instruction):
-        #         self._agent.set_instruction(self.root_instruction)
-        #     else:
-        #         # Sinon on réassigne la callable/méthode : l’ADK reprendra la valeur à la prochaine requête
-        #         self._agent.instruction = self.root_instruction
-        # except Exception as e:
-        #     print("WARN: unable to refresh agent instruction:", e)
-
         print("agent_info:", agent_info)
+        self.agents = "\n".join(agent_info) if agent_info else "No friends found"
 
-        # Pas besoin de recréer l'agent : root_instruction lit self.agents à chaque tour.
+    def list_available_agents(self, tool_context: ToolContext):
+    # Retourne la liste des agents actifs ou disponibles
+        return list(self.remote_agent_connections.keys())
+
 
     @classmethod
     async def create(
@@ -117,52 +94,54 @@ class HostAgent:
 
     def create_agent(self) -> Agent:
         return Agent(
-            model=LiteLlm(
-                # ⚠️ Azure OpenAI => prefix 'azure/' + NOM DU DÉPLOIEMENT
-                model=f"azure/{os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o')}",
-                api_base=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                api_key=os.getenv("AZURE_OPENAI_KEY"),
-                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-            ),
-            name="Host_Agent",
+            # model="gemini-2.5-flash",
+            # name="Host_Agent",
+            model=LiteLlm(model="ollama/gemma3:12b", api_base="http://localhost:11434"),
+            name="gemma3_agent",
             instruction=self.root_instruction,
             description="This Host agent orchestrates scheduling pickleball with friends.",
             tools=[
                 self.send_message,
                 book_pickleball_court,
                 list_court_availabilities,
+                self.list_available_agents
             ],
         )
 
     def root_instruction(self, context: ReadonlyContext) -> str:
         return f"""
-**Role:** You are the Host Agent, an expert scheduler for pickleball games. Your primary function is to coordinate with friend agents to find a suitable time to play and then book a court.
+        **Role:** You are the Host Agent, an expert scheduler for pickleball games. Your primary function is to coordinate with friend agents to find a suitable time to play and then book a court.
 
-**Core Directives:**
-* **Initiate Planning:** When asked to schedule a game, first determine who to invite and the desired date range from the user.
-* **Task Delegation:** Use the `send_message` tool to ask each friend for their availability.
-  * Frame your request clearly (e.g., "Are you available for pickleball between 2024-08-01 and 2024-08-03?").
-  * Make sure you pass in the official name of the friend agent for each message request.
-* **Analyze Responses:** Once you have availability from all friends, analyze the responses to find common timeslots.
-* **Check Court Availability:** Use `list_court_availabilities` to ensure the court is also free at the common timeslots.
-* **Propose and Confirm:** Present the common, court-available timeslots to the user for confirmation.
-* **Book the Court:** After the user confirms a time, use `book_pickleball_court` with `start_time` and `end_time`.
-* **Transparent Communication:** Always summarize, in a few bullet points, what you did after any tool call.
-* **Tool Reliance:** Strictly rely on available tools to address user requests. Do not generate responses based on assumptions.
-* **Readability:** Keep responses concise and easy to scan (bullet points are good).
-* Each available agent represents a friend. So Bob_Agent represents Bob.
+        **Core Directives:**
 
-**Today's Date (YYYY-MM-DD):** {datetime.now().strftime("%Y-%m-%d")}
+        *   **Initiate Planning:** When asked to schedule a game, first determine who to invite and the desired date range from the user.
+        *   **Task Delegation:** Use the `send_message` tool to ask each friend for their availability.
+            *   Frame your request clearly (e.g., "Are you available for pickleball between 2024-08-01 and 2024-08-03?").
+            *   Make sure you pass in the official name of the friend agent for each message request.
+        *   **Analyze Responses:** Once you have availability from all friends, analyze the responses to find common timeslots.
+        *   **Check Court Availability:** Before proposing times to the user, use the `list_court_availabilities` tool to ensure the court is also free at the common timeslots.
+        *   **Propose and Confirm:** Present the common, court-available timeslots to the user for confirmation.
+        *   **Book the Court:** After the user confirms a time, use the `book_pickleball_court` tool to make the reservation. This tool requires a `start_time` and an `end_time`.
+        *   **Transparent Communication:** Relay the final booking confirmation, including the booking ID, to the user. Do not ask for permission before contacting friend agents.
+        *   **Tool Reliance:** Strictly rely on available tools to address user requests. Do not generate responses based on assumptions.
+        *   **Readability:** Make sure to respond in a concise and easy to read format (bullet points are good).
+        *   Each available agent represents a friend. So Bob_Agent represents Bob.
+        *   When asked for which friends are available, you should return the names of the available friends (aka the agents that are active).
+        *   When get
 
-<Available Agents>
-{self.agents}
-</Available Agents>
-"""
+        **Today's Date (YYYY-MM-DD):** {datetime.now().strftime("%Y-%m-%d")}
+
+        <Available Agents>
+        {self.agents}
+        </Available Agents>
+        """
 
     async def stream(
         self, query: str, session_id: str
     ) -> AsyncIterable[dict[str, Any]]:
-        """Streams the agent's response to a given query."""
+        """
+        Streams the agent's response to a given query.
+        """
         session = await self._runner.session_service.get_session(
             app_name=self._agent.name,
             user_id=self._user_id,
@@ -181,23 +160,34 @@ class HostAgent:
         ):
             if event.is_final_response():
                 response = ""
-                if event.content and event.content.parts:
-                    response = _parts_to_text(event.content.parts)
-                if not response:
-                    response = "Action effectuée. Souhaites-tu que je propose des créneaux ou que je réserve directement ?"
-                yield {"is_task_complete": True, "content": response}
+                if (
+                    event.content
+                    and event.content.parts
+                    and event.content.parts[0].text
+                ):
+                    response = "\n".join(
+                        [p.text for p in event.content.parts if p.text]
+                    )
+                yield {
+                    "is_task_complete": True,
+                    "content": response,
+                }
             else:
-                yield {"is_task_complete": False, "updates": "The host agent is thinking..."}
+                yield {
+                    "is_task_complete": False,
+                    "updates": "The host agent is thinking...",
+                }
 
     async def send_message(self, agent_name: str, task: str, tool_context: ToolContext):
         """Sends a task to a remote friend agent."""
         if agent_name not in self.remote_agent_connections:
             raise ValueError(f"Agent {agent_name} not found")
         client = self.remote_agent_connections[agent_name]
+
         if not client:
             raise ValueError(f"Client not available for {agent_name}")
 
-        # Simple IDs
+        # Simplified task and context ID management
         state = tool_context.state
         task_id = state.get("task_id", str(uuid.uuid4()))
         context_id = state.get("context_id", str(uuid.uuid4()))
@@ -219,9 +209,11 @@ class HostAgent:
         send_response: SendMessageResponse = await client.send_message(message_request)
         print("send_response", send_response)
 
-        if not isinstance(send_response.root, SendMessageSuccessResponse) or not isinstance(send_response.root.result, Task):
+        if not isinstance(
+            send_response.root, SendMessageSuccessResponse
+        ) or not isinstance(send_response.root.result, Task):
             print("Received a non-success or non-task response. Cannot proceed.")
-            return [{"type": "text", "text": f"Échec d'envoi à {agent_name} (réponse non valide)."}]
+            return
 
         response_content = send_response.root.model_dump_json(exclude_none=True)
         json_content = json.loads(response_content)
@@ -231,40 +223,38 @@ class HostAgent:
             for artifact in json_content["result"]["artifacts"]:
                 if artifact.get("parts"):
                     resp.extend(artifact["parts"])
-        if not resp:
-            resp = [{"type": "text", "text": f"Message envoyé à {agent_name} : {task}\n(En attente de sa réponse...)"}]
         return resp
 
 
-# --- FIN DE LA CLASSE HostAgent ---
-
-
 def _get_initialized_host_agent_sync():
-    """
-    Initialise l'agent sans casser la boucle asyncio d’Uvicorn/ADK.
-    - Si aucune loop ne tourne : on attend l’init async (pour remplir la friend list).
-    - Si une loop tourne déjà : on planifie l’init en tâche et on rend l'agent *tout de suite*.
-    """
-    instance = HostAgent()
-    friend_agent_urls = [
-        "http://localhost:10003",  # Nate's Agent
-        "http://localhost:10004",  # Kaitlynn's Agent
-    ]
+    """Synchronously creates and initializes the HostAgent."""
+
+    async def _async_main():
+        # Hardcoded URLs for the friend agents
+        friend_agent_urls = [
+            "http://localhost:10002",  # Karley's Agent
+            "http://localhost:10003",  # Nate's Agent
+            "http://localhost:10004",  # Kaitlynn's Agent
+        ]
+
+        print("initializing host agent")
+        hosting_agent_instance = await HostAgent.create(
+            remote_agent_addresses=friend_agent_urls
+        )
+        print("HostAgent initialized")
+        return hosting_agent_instance.create_agent()
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # ✅ Ne PAS bloquer ni lever d'erreur : on planifie l'init et on retourne l'agent immédiatement
-            loop.create_task(instance._async_init_components(friend_agent_urls))
-            return instance._agent
+        return asyncio.run(_async_main())
+    except RuntimeError as e:
+        if "asyncio.run() cannot be called from a running event loop" in str(e):
+            print(
+                f"Warning: Could not initialize HostAgent with asyncio.run(): {e}. "
+                "This can happen if an event loop is already running (e.g., in Jupyter). "
+                "Consider initializing HostAgent within an async function in your application."
+            )
         else:
-            # Pas de loop en cours → on peut attendre l’init
-            loop.run_until_complete(instance._async_init_components(friend_agent_urls))
-            return instance._agent
-    except RuntimeError:
-        # Pas de loop dispo → on en crée une juste pour l’init
-        asyncio.run(instance._async_init_components(friend_agent_urls))
-        return instance._agent
+            raise
 
 
 root_agent = _get_initialized_host_agent_sync()

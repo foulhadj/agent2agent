@@ -9,6 +9,13 @@ from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
+# from google.adk.models.lite_llm import LiteLlm
+#from langchain_community.llms import Ollama
+from langchain_ollama import ChatOllama
+from langchain_openai import AzureChatOpenAI
+import os
+
+
 from pydantic import BaseModel, Field
 
 memory = MemorySaver()
@@ -118,7 +125,17 @@ class KaitlynAgent:
     )
 
     def __init__(self):
-        self.model = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        #self.model = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        #self.model = LiteLlm(model="ollama/gemma3:12b", api_base="http://localhost:11434")
+        #self.model = ChatOllama(model="llama3.2:3b")
+        self.model = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
+            temperature=0,
+        )
+
         self.tools = [get_availability]
 
         self.graph = create_react_agent(

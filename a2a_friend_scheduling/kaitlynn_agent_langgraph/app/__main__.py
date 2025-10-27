@@ -31,8 +31,8 @@ def main():
     host = "localhost"
     port = 10004
     try:
-        if not os.getenv("GOOGLE_API_KEY"):
-            raise MissingAPIKeyError("GOOGLE_API_KEY environment variable not set.")
+        # if not os.getenv("GOOGLE_API_KEY"):
+        #     raise MissingAPIKeyError("GOOGLE_API_KEY environment variable not set.")
 
         capabilities = AgentCapabilities(streaming=True, pushNotifications=True)
         skill = AgentSkill(
